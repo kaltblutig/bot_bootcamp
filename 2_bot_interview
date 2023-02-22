@@ -1,0 +1,616 @@
+import openai
+import telebot
+from telebot import types
+
+from gtts import gTTS
+import os
+import requests
+import json
+import urllib #save files
+import time
+import datetime
+import random
+
+
+
+##___________________________________________________________________
+##Section 4 - API keys input
+
+#OpenAI initialisation
+OpenAI_API_KEY = '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' #To English_Topic_Bot
+openai.api_key = OpenAI_API_KEY
+
+#Merf text to speech API key
+Merf_API_KEY = 'api_826c96cf-fdfe-47d2-a6a7-1790cfe67a07'
+
+
+##___________________________________________________________________
+##Section 5 – Library of native functions
+
+def text_to_speech_by_murf(TEXT_TO_GENERATE, UserId):
+
+    # getting token from api_key
+    url='https://api.murf.ai/v1/auth/token'
+    headers={'api-key': 'api_826c96cf-fdfe-47d2-a6a7-1790cfe67a07'}
+
+    resp=requests.get(url=url, headers=headers)
+    resp=json.loads(resp.text)
+
+    token = resp['token']
+
+    # getting list of voices
+    headers={'token': token}
+    url='https://api.murf.ai/v1/speech/voices'
+
+    resp=requests.get(url=url, headers=headers)
+    resp=json.loads(resp.text)
+
+    #show voices json (choose voiceId)
+    #print(resp)
+
+
+    # generating speech from text
+    #TEXT_TO_GENERATE = "I like to travel around Europe"
+    CHOSEN_VOICE = "en-US-brianna"
+    FORMAT="MP3"
+
+    headers={'token': token, 'Content-Type': 'application/json'}
+    data={
+        "text": TEXT_TO_GENERATE,
+        "voiceId": CHOSEN_VOICE,
+        "format": FORMAT,
+        "channelType": "MONO",
+        "sampleRate": "24000"
+    }
+    url='https://api.murf.ai/v1/speech/generate'
+
+    resp=requests.post(url=url, headers=headers, json=data)
+    resp=json.loads(resp.text)
+
+    url_to_audio = resp['audioFile']
+
+    #print(url_to_audio)
+
+    # download file
+    urllib.request.urlretrieve(url_to_audio, f"text_to_speech_by_murf"+str(UserId)+".mp3")
+
+    return "text_to_speech_by_murf"+str(UserId)+".mp3"
+
+def send_message_as_a_voice(message, bot_last_comment, voice_type): # Murf | GTTS | Facebook
+
+        if voice_type == "murf":  
+            answer_audio_place = text_to_speech_by_murf(bot_last_comment, message.from_user.id)
+            bot.send_voice(message.chat.id, open(answer_audio_place, 'rb'))
+            ##bot.send_voice(chat_id = message.chat.id, open(answer_audio_place, 'rb')) ## что то не работает
+            ##bot.send_voice(chat_id = message.chat.id, audio = open(answer_audio_place, 'rb')) ## так раоботает, но отправляет херню
+            
+            bot_properties=bot.get_me()
+            botId = bot_properties.id
+            botName = bot_properties.username
+            save_to_db(
+                conversationId = active_users[message.from_user.id]['ConvId'],
+                userId = botId,
+                userName = botName,
+                isStudent = 0,
+                userSpeechRecordedAt = int(time.time()),
+                userSpeechRecordFormat = 'mp3',
+                userSpeech = active_users[message.from_user.id]['LastQues'],
+                userSpeechRecordPath = "text_to_speech_by_murf"+str(message.from_user.id)+".mp3",
+                userSpeechRecordFileName = "text_to_speech_by_murf"+str(message.from_user.id)+".mp3",
+            )
+
+            # if os.path.exists("text_to_speech_by_murf"+str(message.from_user.id)+".mp3"):
+            #   print('File to DB exist')
+            # else: print('No file to DB')
+
+        if voice_type == "gtts":  
+            output = gTTS(bot_last_comment, lang = 'en', slow = False)
+            output.save("sent_message_audio"+str(message.from_user.id)+".wav")
+            sent_message_audio = open('sent_message_audio'+str(message.from_user.id)+'.wav', 'rb')
+            bot.send_voice(message.chat.id, sent_message_audio)
+
+        if voice_type == "facebook":
+            fixed_text = bot_last_comment.replace('. ','.,, ').replace(' and ',', and').replace(' but ',', but ').replace(' howether ',', howether ').replace('?','?,').replace(':',' ').replace('!','!,')
+            headers={'Username': 'abc@gmail.com', 'apikey':'123-456'}
+            payload={'text':fixed_text}
+            resp = requests.post("http://sel3-common-ml-2.skyeng.link:8010", json=payload, headers=headers )
+            result=resp.content
+            bot.send_voice(message.chat.id, result)
+
+            bot_properties=bot.get_me()
+            botId = bot_properties.id
+            botName = bot_properties.username
+            save_to_db_fb(
+                conversationId = active_users[message.from_user.id]['ConvId'],
+                userId = botId,
+                userName = botName,
+                isStudent = 0,
+                userSpeechRecordedAt = int(time.time()),
+                userSpeechRecordFormat = 'wav',
+                userSpeech = active_users[message.from_user.id]['LastQues'],
+                userSpeechRecord = result,
+                userSpeechRecordFileName = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')+'-IvanBot-'+str(message.from_user.id)+'.wav',
+            )
+            # if os.path.exists("text_to_speech_by_murf"+str(message.from_user.id)+".mp3"):
+            #   print('File to DB exist')
+            # else: print('No file to DB')
+        
+        return 0
+
+def get_student_voice_and_transcribe(message):
+    #global Dialog, Student_first_name
+    global active_users
+    check_user_exist(message.from_user.id)
+
+    #-----get voice-----
+    file_info = bot.get_file(message.voice.file_id)
+    downloaded_file = bot.download_file(file_info.file_path)
+
+    #----- -----
+
+    #-----transcribe voice-----
+    # result = model.transcribe(last_voice_from_user, language="en", fp16=False)
+    # Student_answer = result["text"]
+    # bot.send_message(message.chat.id, 'You mean: ' + Student_answer, parse_mode='html')
+    #----- -----
+
+    #-----transcribe voice by Vitya-----
+    headers={'Username': 'abc@gmail.com', 'apikey':'123-456','params':'file_inference,-1'}
+    
+    payload = [('file',downloaded_file)]
+    #-----transcribe voice-----
+    resp = requests.post("http://sel3-common-ml-2.skyeng.link:8001", files=payload, headers=headers ) #http://sel3-common-ml-2.skyeng.link:8001
+    #downloaded_file.close()
+    resp=json.loads(resp.text)
+    result=' '.join([x[0] for x in resp['result']])
+
+    active_users[message.from_user.id]['Student_answer'] = result
+    bot.send_message(message.chat.id, 'You mean: ' + result, parse_mode='html')
+    #----- -----
+
+
+    active_users[message.from_user.id]['Dialog'] = active_users[message.from_user.id]['Dialog'] + '\n' + "Student" + ': ' + result
+
+    return result
+
+#def next_recommended_comment_by_GPT(Main_prompt, Dialog): #Без добавления доп.промтов и уточнений
+    # Dialog = Dialog + '\n' + 'Alice: '
+    # prompt = Main_prompt + Dialog
+    # response = openai.Completion.create(engine="text-davinci-003", prompt = prompt, max_tokens=250, temperature=0.7) #max_tokens=5
+    # response_text_string = response['choices'][0]['text']
+    # return response_text_string
+
+# Ученик не понял вопрос?
+def Paraphrase_Requested(answer):
+    pre_prompt = '''Below is a student answer for a question. 
+    Say "yes" if the answer means that student do not understand a question or asks repeat the question. 
+    Say "no" otherwise'''
+    prompt = pre_prompt + '\n' + 'Answer: ' + answer + '\n' + 'UnderstandingCheck: '
+    try:
+        response = openai.Completion.create(engine="text-davinci-003", prompt = prompt, max_tokens=250, temperature=0.7) #max_tokens=5
+    except:
+        response = openai.Completion.create(engine="text-davinci-003", prompt = prompt, max_tokens=250, temperature=0.7) #max_tokens=5    
+    response_text_string = response['choices'][0]['text']
+    #print(response_text_string)
+    return (response_text_string == " Yes") or (response_text_string == " yes")
+
+# Переформулировка вопроса
+def paraphrase(question):    
+    pre_prompt = "You are an interviewer. You gave a question below to an applicant. He didn't understand it. Rephrase the question below. \n"
+    prompt = pre_prompt + 'Question: ' + question
+    try:
+        response = openai.Completion.create(engine="text-davinci-003", prompt = prompt, max_tokens=250, temperature=0.7) #max_tokens=5
+    except:
+        response = openai.Completion.create(engine="text-davinci-003", prompt = prompt, max_tokens=250, temperature=0.7) #max_tokens=5    
+    response_text_string = response['choices'][0]['text']
+    return response_text_string
+
+# Завершение интервью -- формируем ответ
+def InterviewEnding(StudRate):
+    if StudRate >= InterviewPassedScore:
+      pre_prompt = "You are an interviewer. An applicant passed the interview. Praise him and tell you would call him later. \n"
+    else:
+      pre_prompt = "You are an interviewer. An applicant didn't passed the interview. Tell him about it and advise to continue learning. \n"
+    try:
+        response = openai.Completion.create(engine="text-davinci-003", prompt = pre_prompt, max_tokens=250, temperature=0.7) #max_tokens=5
+    except:
+        response = openai.Completion.create(engine="text-davinci-003", prompt = pre_prompt, max_tokens=250, temperature=0.7) #max_tokens=5    
+
+    response_text_string = response['choices'][0]['text']
+
+    return response_text_string
+
+# Проверяем ответ студента в общем случае
+def check_student_answer(question, answer, studId): #Здесь поправить промт для того, что проверять в ответе У
+    global active_users
+    check_user_exist(studId)
+    
+    pre_prompt = '''You are an interviewer. Below are a question and answer from an interview for the position of a Python developer. 
+    Check whether the answer is correct. If the answer is correct, you say "yes", than praise the student and suggest to go to the next question. 
+    If the answer is not correct, you say "no", than describe what is wrong in the answer. After that suggest to try answer again or go to the next question.
+    If the answer cannot be correct or not, you say "let us go to the next question". 
+    You do not repeat students answer.'''
+    prompt = pre_prompt + '\n' + 'Question: ' + question + '\n' + 'Answer: ' + answer + '\n' + 'Comment: '
+    try:
+        response = openai.Completion.create(engine="text-davinci-003", prompt = prompt, max_tokens=250, temperature=0.7) #max_tokens=5
+    except:
+        response = openai.Completion.create(engine="text-davinci-003", prompt = prompt, max_tokens=250, temperature=0.7) #max_tokens=5    
+
+    response_text_string = response['choices'][0]['text']
+    #print(prompt + '\n\n' + response_text_string)
+
+    # Накидываем балл за правильный код
+    if 'Yes' in response_text_string:
+      active_users[studId]['StudRate'] += 1
+    
+    return response_text_string
+
+# Здесь проверяем ответ студента, если ответ текстовый = код
+def check_student_code(question, answer, studId): #Здесь поправить промт для того, что проверять в ответе У
+    global active_users
+    check_user_exist(studId)
+
+    pre_prompt = '''You are an interviewer. Below are a question and an answer from an interview for the position of a Python developer. 
+    Question contains a requirements to a programm an applicant must write. Answer contains the code written by an applicant.
+    You need to check the code from the answer in terms of several points:
+    1. Does the code work correctly?
+    2. Does the code do exactly what is required in the question?
+    If the code from the answer fits the requirements from the list above, you say "yes", than praise the student and suggest to go to the next question. 
+    If the code from the answer does not fit the requirements, you say "no", than describe the mistake for an applicant in polite way. After that suggest the applicant to try again or to go to the next question.'''
+    prompt = pre_prompt + '\n' + 'Question: ' + question + '\n' + 'Answer: ' + answer + '\n' + 'Comment: '
+    try:
+        response = openai.Completion.create(engine="text-davinci-003", prompt = prompt, max_tokens=250, temperature=0.7) #max_tokens=5
+    except:
+        response = openai.Completion.create(engine="text-davinci-003", prompt = prompt, max_tokens=250, temperature=0.7) #max_tokens=5    
+
+    response_text_string = response['choices'][0]['text']
+    #print(prompt + '\n\n' + response_text_string)
+
+    # Накидываем балл за правильный код
+    if 'Yes' in response_text_string:
+      active_users[studId]['StudRate'] += 1
+    
+    return response_text_string
+
+#def check_student_english(answer): #Здесь промт проверки языка. Его нужно докрутить, чтобы не чекал Питон
+    # pre_prompt = '''Below is a student answer.
+    #               You correct english grammar and lexical mistakes if necessary and explain them. Do not correct mistakes in Python.
+    #               If you don't find any mistake in terms of English language, then praise the student'''
+    
+    # prompt = pre_prompt + '\n' + Dialog + '\n' + 'Comment: '
+
+    # response = openai.Completion.create(engine="text-davinci-003", prompt = prompt, max_tokens=250, temperature=0.7) #max_tokens=5
+    # response_text_string = response['choices'][0]['text']
+    # return response_text_string
+
+# Сохранение реплик в БД
+def save_to_db_good(conversationId: str,
+               userId: str,
+               userName: str,
+               isStudent: int,
+               userSpeechRecordedAt: int,
+               userSpeechRecordFormat: str,
+               userSpeech: str,
+               userSpeechRecordPath: str,
+               userSpeechRecordFileName: str
+               ):    
+    try:
+      data = {
+          'conversationId': conversationId,
+          'userId': userId,
+          'userName': userName,
+          'isStudent': isStudent,
+          'userSpeechRecordedAt': userSpeechRecordedAt,
+          'userSpeechRecordFormat': userSpeechRecordFormat,
+          'userSpeech': userSpeech,
+      }
+      files = {
+          'userSpeechRecord': (userSpeechRecordFileName, open(userSpeechRecordPath, 'rb'))
+      }
+      response = requests.post(
+          'https://speech-mistakes-analysis.skyeng.ru/server-api/v1/speech-analyser/save-data-from-tg-bot',
+          data=data,
+          files=files,
+      )
+    except Exception as e:
+      print('An exception occurred: {}'.format(e))  
+
+def save_to_db(conversationId: str,
+               userId: str,
+               userName: str,
+               isStudent: int,
+               userSpeechRecordedAt: int,
+               userSpeechRecordFormat: str,
+               userSpeech: str,
+               userSpeechRecordPath: str,
+               userSpeechRecordFileName: str
+               ):
+  data = {
+      'conversationId': conversationId,
+      'userId': userId,
+      'userName': userName,
+      'isStudent': isStudent,
+      'userSpeechRecordedAt': userSpeechRecordedAt,
+      'userSpeechRecordFormat': userSpeechRecordFormat,
+      'userSpeech': userSpeech,
+  }
+  if userSpeechRecordFileName!='':
+      files = {'userSpeechRecord': (userSpeechRecordFileName, open(userSpeechRecordPath, 'rb'))}
+      response = requests.post(
+	      'https://speech-mistakes-analysis.skyeng.ru/server-api/v1/speech-analyser/save-data-from-tg-bot',
+	      data=data,
+	      files=files,
+	  )
+  else:
+      response = requests.post('https://speech-mistakes-analysis.skyeng.ru/server-api/v1/speech-analyser/save-data-from-tg-bot',data=data)
+
+def save_to_db_fb(conversationId: str,
+               userId: str,
+               userName: str,
+               isStudent: int,
+               userSpeechRecordedAt: int,
+               userSpeechRecordFormat: str,
+               userSpeech: str,
+               userSpeechRecord: bytes,
+               userSpeechRecordFileName: str
+               ):
+  data = {
+      'conversationId': conversationId,
+      'userId': userId,
+      'userName': userName,
+      'isStudent': isStudent,
+      'userSpeechRecordedAt': userSpeechRecordedAt,
+      'userSpeechRecordFormat': userSpeechRecordFormat,
+      'userSpeech': userSpeech,
+  }
+  files = {
+          'userSpeechRecord': (userSpeechRecordFileName, userSpeechRecord)
+  }
+
+  response = requests.post(
+      'https://speech-mistakes-analysis.skyeng.ru/server-api/v1/speech-analyser/save-data-from-tg-bot',
+      data=data,
+      files=files,
+  )
+
+# Проверка существования пользователя чата
+def check_user_exist(user_id):
+  global active_users
+  try: active_users[user_id]
+  except:
+      active_users[user_id] = {
+          'Dialog': '',
+          'Student_answer': '',
+          'Bot_last_comment': '',
+          'Student_last_comment': '',
+          'State': '1',
+          'Main_prompt': '',
+          'StudRate': 0,
+          'LastQues': '',
+          'QuesNum': 0,
+          'QuesNumsDone': [],
+          'result': '',
+          'end_message': '',
+          'NeedRepeat': False,
+          'QuestionModified': '',
+          'comment_from_GPT': '',
+          'ConvId': ''
+          }
+  return
+
+def print_user_info(user_id):
+  global active_users
+  
+  print('Dialog = ' + active_users[user_id]['Dialog'] + '\n')
+  print('Student_answer = ' + active_users[user_id]['Student_answer'] + '\n')
+  print('Bot_last_comment = ' + active_users[user_id]['Bot_last_comment'] + '\n')
+  print('Student_last_comment = ' + active_users[user_id]['Student_last_comment'] + '\n')
+  print('Main_prompt = ' + active_users[user_id]['Main_prompt'] + '\n')
+  print('StudRate = ' + str(active_users[user_id]['StudRate']) + '\n')
+  print('LastQues = ' + active_users[user_id]['LastQues'] + '\n')
+  print('QuesNum = ' + str(active_users[user_id]['QuesNum']) + '\n')
+  #print('QuesNumsDone = ' + active_users[user_id]['QuesNumsDone'] + '\n')
+  print('result = ' + active_users[user_id]['result'] + '\n')
+  print('end_message = ' + active_users[user_id]['end_message'] + '\n')
+  #print('NeedRepeat = ' + active_users[user_id]['DialNeedRepeatog'] + '\n')
+  print('QuestionModified = ' + active_users[user_id]['QuestionModified'] + '\n')
+  print('comment_from_GPT = ' + active_users[user_id]['comment_from_GPT'] + '\n')
+  
+  return
+
+
+##___________________________________________________________________
+##Section 6 - Preparing questions
+
+
+##Create a list of questions -- переписать создание списка
+# 1. список вопросов 10 штук прописать прям тут кодом
+# 2. продумать структуру списка вопросов по группам
+# 3. завести кодом список вопросов по структуре
+# 4. настроить импорт списка вопросов из внешнего дока
+
+interivew_python_questions = [
+    "Tell me about yourself and your development experience.",
+    "Have you ever learned any other programming language and why?",
+    "Is Python case sensitive?",
+    "What data types do you know?",
+    "What is a Lambda function?",
+    "What is a difference between shallow and deep copying?",
+    "What do you know about OOP and its principles?",         # ниже практика
+    "Write a program to produce Fibonacci series in Python.", 
+    "Write a program in Python to check if a number is prime.",
+    "Write a function to reverse a string."
+]
+
+
+##___________________________________________________________________
+##Section 7 - Main
+
+
+bot = telebot.TeleBot('6135435794:AAGod9Iv7fJeikWCmn0TciUufnVzBt_Uark') #t.me/vanya_bootcamp_test_bot
+
+#conversationId = str(datetime.datetime.now()) + '-ivan' -- это только для кейса 1 У в боте единовременно. 
+
+active_users = {}     # список участников чата
+InterviewPassedScore = 7 # Баллов, чтобы пройти интервью
+#StudRate = 0    # Кол-во набранных баллов
+#LastQues = ""   # Последний заданный вопрос
+#QuesNum = 0     # Номер последнего заданного вопроса
+#QuesNumsDone = [] # Список номеров заданных вопросов -- чтоб не повторяться
+
+
+@bot.message_handler(commands=['start']) #стартовое + первый рандомный вопрос из списка
+def send_welcome_message(message):
+
+    global active_users
+    check_user_exist(message.from_user.id) # заводим нового пользователя
+    # создаём идентификатор диалога в момент нажатия Старт
+    active_users[message.from_user.id]['ConvId'] = '-vanya-'+ str(message.chat.id) + '-' + str(datetime.datetime.now())
+
+    # Уточнить входное сообщение
+    start_message = '''Are you ready? Let's start! Today we will have an interview on Python developer position. 
+    We will ask you various questions about Python and check your answers. 
+    After each question, we will correct you a little in Python itself.
+    If you're asked to write a code -- send a code :)
+    ATTENTION: send one message as an answer for each question only!
+    
+    If you want to go to the next question, type command "/next".
+        
+    We hope that this simulator will help you better prepare for an interview, to learn Python and English.
+    '''
+    # Добавить про проверку АЯ, когда добавлю в код!!!!
+    #If you want us to check your English, type command "english"
+    #If you want us to check your code, type command "python"
+
+    bot.send_message(message.chat.id, start_message, parse_mode='html')
+
+    # Выбираем рандомный вопрос из списка -- надо переписать под структуру вопросов
+    active_users[message.from_user.id]['QuesNum'] = 0 #random.randint(0, len(interivew_python_questions) - 1)
+    active_users[message.from_user.id]['QuesNumsDone'].append(active_users[message.from_user.id]['QuesNum'])
+    active_users[message.from_user.id]['LastQues'] = interivew_python_questions[active_users[message.from_user.id]['QuesNum']]
+    active_users[message.from_user.id]['Dialog'] = active_users[message.from_user.id]['Dialog'] + '\n' + 'Question: ' + active_users[message.from_user.id]['LastQues']
+    send_message_as_a_voice(message, active_users[message.from_user.id]['LastQues'], "facebook")
+    #print(active_users[message.from_user.id]['LastQues'])
+    
+    # bot_properties=bot.get_me() -- запись внутри отправки сообщения
+    # botId = bot_properties.id
+    # botName = bot_properties.username
+    # save_to_db(
+    #     conversationId = '-vanya-'+ str(message.chat.id),
+    #     userId = botId,
+    #     userName = botName,
+    #     isStudent = 0,
+    #     userSpeechRecordedAt = int(time.time()),
+    #     userSpeechRecordFormat = 'mp3',
+    #     userSpeech = active_users[message.from_user.id]['LastQues'],
+    #     userSpeechRecordPath = "text_to_speech_by_murf"+str(message.from_user.id)+".mp3",
+    #     userSpeechRecordFileName = "text_to_speech_by_murf"+str(message.from_user.id)+".mp3",
+    # )
+    # if os.path.exists("text_to_speech_by_murf"+str(message.from_user.id)+".mp3"):
+    #   print('File to DB exist')
+    # else: print('No file to DB')
+
+    #print_user_info(message.from_user.id)
+
+@bot.message_handler(commands=['next']) #важно управлять рандомом, чтобы не повторялись вопросы
+def send_next_question(message): 
+
+    global active_users
+    check_user_exist(message.from_user.id)
+
+    #random_index = random.randint(0, len(interivew_python_questions) - 1)
+    if len(active_users[message.from_user.id]['QuesNumsDone']) < len(interivew_python_questions):
+      active_users[message.from_user.id]['QuesNum'] += 1
+      active_users[message.from_user.id]['QuesNumsDone'].append(active_users[message.from_user.id]['QuesNum'])
+      active_users[message.from_user.id]['LastQues'] = interivew_python_questions[active_users[message.from_user.id]['QuesNum']]
+      active_users[message.from_user.id]['Dialog'] = active_users[message.from_user.id]['Dialog'] + '\n' + 'Question: ' + active_users[message.from_user.id]['LastQues']
+      send_message_as_a_voice(message, active_users[message.from_user.id]['LastQues'], "facebook")
+      #print(active_users[message.from_user.id]['LastQues'])
+
+    else:
+      active_users[message.from_user.id]['result'] = InterviewEnding(active_users[message.from_user.id]['StudRate']) 
+      #result = "That's all question for you for now. Well done!"
+      active_users[message.from_user.id]['Dialog'] = active_users[message.from_user.id]['Dialog'] + '\n' + 'Result: ' + active_users[message.from_user.id]['result']
+      send_message_as_a_voice(message, active_users[message.from_user.id]['result'], "facebook")
+
+      active_users[message.from_user.id]['end_message'] = 'Your result is ' + str(active_users[message.from_user.id]['StudRate']) + ' of ' + str(len(interivew_python_questions)) + ' with a "pass"-result equals ' + str(InterviewPassedScore)
+      bot.send_message(message.chat.id, active_users[message.from_user.id]['end_message'], parse_mode='html')
+
+      RestartMess = 'If you would like to try again, type command "/start". Good luck!'
+      bot.send_message(message.chat.id, RestartMess, parse_mode='html')
+      print_user_info(message.from_user.id)  
+
+
+@bot.message_handler(content_types=['voice']) #обработчик входного сообщения
+def voice_processing(message):
+    global active_users
+    check_user_exist(message.from_user.id)
+
+    #student_audio_path = 'last_voice_from_user'+str(message.from_user.id)+'.mp3'
+    active_users[message.from_user.id]['Student_answer'] = get_student_voice_and_transcribe(message)
+    active_users[message.from_user.id]['Dialog'] = active_users[message.from_user.id]['Dialog'] + '\n' + 'Answer: ' + active_users[message.from_user.id]['Student_answer']
+
+    save_to_db_fb(
+      conversationId = active_users[message.from_user.id]['ConvId'],
+      userId = message.from_user.id,
+      userName = message.from_user.first_name,
+      isStudent = 1,
+      userSpeechRecordedAt = int(time.time()),
+      userSpeechRecordFormat = 'wav',
+      userSpeech = active_users[message.from_user.id]['Student_answer'],
+      userSpeechRecord = active_users[message.from_user.id]['Student_answer'],
+      #userSpeechRecordPath = 'last_voice_from_user'+str(message.from_user.id)+'.wav',
+      userSpeechRecordFileName = 'last_voice_from_user'+str(message.from_user.id)+'.wav',
+    ) 
+    #print_user_info(message.from_user.id)         
+
+    active_users[message.from_user.id]['NeedRepeat'] = False
+    active_users[message.from_user.id]['NeedRepeat'] = Paraphrase_Requested(active_users[message.from_user.id]['Student_answer'])
+    #print(Student_answer + '\n')
+    #print('NeedRepeat = ' + str(NeedRepeat))
+    if active_users[message.from_user.id]['NeedRepeat']:
+      active_users[message.from_user.id]['QuestionModified'] = paraphrase(active_users[message.from_user.id]['LastQues'])
+      send_message_as_a_voice(message, active_users[message.from_user.id]['QuestionModified'], "facebook")
+      #print('Rephrased')
+
+      return 0
+
+
+    active_users[message.from_user.id]['comment_from_GPT'] = check_student_answer(active_users[message.from_user.id]['LastQues'], active_users[message.from_user.id]['Student_answer'], message.from_user.id) # нужно переписать обработчик: доп.вопросы
+    send_message_as_a_voice(message, active_users[message.from_user.id]['comment_from_GPT'], "facebook")
+    
+    GoToNext = 'If you want to go to the next question type command "/next". Till that your phrases are related to the last question given.'
+    bot.send_message(message.chat.id, GoToNext, parse_mode='html')    
+    #print_user_info(message.from_user.id)
+
+    #Выводить кнопки next|Quit или проговаривать инструкцию к ним чтобы пойти дальше
+
+@bot.message_handler(content_types=['text']) #обработчик входного сообщения в виде текста       
+def text_processing(message):
+    global active_users
+    check_user_exist(message.from_user.id)
+    
+    save_to_db(
+      conversationId = active_users[message.from_user.id]['ConvId'],
+      userId = message.from_user.id,
+      userName = message.from_user.first_name,
+      isStudent = 1,
+      userSpeechRecordedAt = int(time.time()),
+      userSpeechRecordFormat = 'wav',
+      userSpeech = message.text,
+      userSpeechRecordPath = '',
+     userSpeechRecordFileName = '',
+    ) 
+    active_users[message.from_user.id]['Student_answer'] = message.text
+    active_users[message.from_user.id]['comment_from_GPT'] = check_student_code(active_users[message.from_user.id]['LastQues'], active_users[message.from_user.id]['Student_answer'], message.from_user.id) # нужно переписать обработчик: доп.вопросы
+    send_message_as_a_voice(message, active_users[message.from_user.id]['comment_from_GPT'], "facebook")
+    
+    print_user_info(message.from_user.id)
+
+    GoToNext = 'If you want to go to the next question type command "/next". Till that your phrases are related to the last question given.'
+    bot.send_message(message.chat.id, GoToNext, parse_mode='html')
+    
+    #Добавить возможность выводить комментарии текстом или повторять/перефразировать их, если пользователь не понял
+
+
+bot.polling(none_stop=True)
