@@ -1,0 +1,1453 @@
+import telebot
+from telebot import types
+
+import whisper
+
+import openai
+
+from gtts import gTTS
+
+import os
+from os import path
+
+import requests
+import json
+
+import urllib  # save files
+
+import time
+import datetime
+
+import random
+
+import g2p_en
+import re
+from os import path
+from pydub import AudioSegment
+import warnings
+
+import whisper
+from transformers import WhisperForConditionalGeneration, WhisperProcessor, WhisperModel, WhisperFeatureExtractor
+import torch
+
+torch.cuda.is_available()
+import torchaudio
+
+torchaudio.set_audio_backend('sox_io')
+from torchaudio.functional.filtering import lowpass_biquad, highpass_biquad
+import numpy as np
+import pandas as pd
+import warnings
+warnings.filterwarnings('ignore')
+from tqdm import tqdm
+
+from fairseq.checkpoint_utils import load_model_ensemble_and_task_from_hf_hub
+from fairseq.models.text_to_speech.hub_interface import TTSHubInterface
+import io
+import soundfile as sf
+
+model = whisper.load_model("base.en")
+
+
+# result=tts(bot_last_comment)
+# bot.send_voice(message.chat.id, result)
+
+
+# OpenAI inicialization
+OpenAI_API_KEY = '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'  # To English_Topic_Bot
+openai.api_key = OpenAI_API_KEY
+
+##Merf text to speech API key
+Merf_API_KEY = 'api_826c96cf-fdfe-47d2-a6a7-1790cfe67a07'
+TEXT_TO_GENERATE = 'Hello my friend. Stay while and listen...'
+
+
+def text_to_speech_by_murf(TEXT_TO_GENERATE, UserId):
+    # getting token from api_key
+    url = 'https://api.murf.ai/v1/auth/token'
+    headers = {'api-key': 'api_826c96cf-fdfe-47d2-a6a7-1790cfe67a07'}
+
+    resp = requests.get(url=url, headers=headers)
+    resp = json.loads(resp.text)
+
+    token = resp['token']
+
+    # getting list of voices
+    headers = {'token': token}
+    url = 'https://api.murf.ai/v1/speech/voices'
+
+    resp = requests.get(url=url, headers=headers)
+    resp = json.loads(resp.text)
+
+    # show voices json (choose voiceId)
+    # print(resp)
+
+    # generating speech from text
+    # TEXT_TO_GENERATE = "I like to travel around Europe"
+    CHOSEN_VOICE = "en-US-brianna"
+    FORMAT = "MP3"
+
+    headers = {'token': token, 'Content-Type': 'application/json'}
+    data = {
+        "text": TEXT_TO_GENERATE,
+        "voiceId": CHOSEN_VOICE,
+        "format": FORMAT,
+        "channelType": "MONO",
+        "sampleRate": "24000"
+    }
+    url = 'https://api.murf.ai/v1/speech/generate'
+
+    resp = requests.post(url=url, headers=headers, json=data)
+    resp = json.loads(resp.text)
+
+    # print the response to inspect the JSON structure
+    print("resp:")
+    print(resp)
+
+    url_to_audio = resp['audioFile']
+
+    urllib.request.urlretrieve(url_to_audio, f"text_to_speech_by_murf" + str(UserId) + ".mp3")
+
+    return "text_to_speech_by_murf" + str(UserId) + ".mp3"
+
+
+def send_message_as_a_voice(message, bot_last_comment, voice_type):  # Murf | GTTS | Facebook
+
+    if voice_type == "murf":
+        answer_audio_place = text_to_speech_by_murf(bot_last_comment, message.from_user.id)
+        bot.send_voice(message.chat.id, open(answer_audio_place, 'rb'))
+
+    if voice_type == "gtts":
+        output = gTTS(bot_last_comment, lang='en', slow=False)
+        output.save("sent_message_audio" + str(message.from_user.id) + ".wav")
+        sent_message_audio = open('sent_message_audio' + str(message.from_user.id) + '.wav', 'rb')
+        bot.send_voice(message.chat.id, sent_message_audio)
+
+    if voice_type == "facebook":
+        headers = {'Username': 'abc@gmail.com', 'apikey': '123-456'}
+        payload = {'text': bot_last_comment}
+        resp = requests.post("http://sel3-common-ml-2.skyeng.link:8010", json=payload, headers=headers)
+        bot.send_voice(message.chat.id, resp.content)
+
+        bot_properties = bot.get_me()
+        botId = bot_properties.id
+        botName = bot_properties.username
+        save_to_db(
+            conversationId=message.chat.id,
+            userId=botId,
+            userName=botName,
+            isStudent=0,
+            userSpeechRecordedAt=int(time.time()),
+            userSpeechRecordFormat='mp3',
+            # userSpeech=start_message_part3,
+            userSpeechRecordPath=resp,
+            userSpeechRecordFileName=datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')+'-ANGBot-'+str(message.from_user.id)+'.wav',
+        )
+        if os.path.exists("text_to_speech_by_murf"+str(message.from_user.id)+".mp3"):
+          print('File to DB exist')
+        else: print('No file to DB')
+
+    return 0
+
+    def send_message_as_a_voice(message, bot_last_comment, voice_type):  # Murf | GTTS | Facebook
+
+        if voice_type == "murf":
+            answer_audio_place = text_to_speech_by_murf(bot_last_comment, message.from_user.id)
+            bot.send_voice(message.chat.id, open(answer_audio_place, 'rb'))
+
+        if voice_type == "gtts":
+            output = gTTS(bot_last_comment, lang='en', slow=False)
+            output.save("sent_message_audio" + str(message.from_user.id) + ".wav")
+            sent_message_audio = open('sent_message_audio' + str(message.from_user.id) + '.wav', 'rb')
+            bot.send_voice(message.chat.id, sent_message_audio)
+
+        # в виде локальной функции
+        if voice_type == "facebook":
+            # tts=tts_inference() -- вынес в блок описания функций, чтоб каждый раз не создавать.
+            result = tts(bot_last_comment)
+            print("facebook_tts")
+            print(message.from_user.id)
+            with open("sent_message_audio" + str(message.from_user.id) + ".wav", 'wb') as file:
+                file.write(result)
+            bot.send_voice(message.chat.id, result)
+
+        return 0
+
+        ## А теперь в виде API
+        # headers={'Username': 'abc@gmail.com', 'apikey':'123-456'}
+        # payload={'text':fixed_text}
+        # resp = requests.post("http://sel3-common-ml-2.skyeng.link:8010", json=payload, headers=headers )
+        # bot.send_voice(message.chat.id, resp.content)
+        ##
+
+### ------ Whisper работающий из Collaba ------###
+# def get_student_voice_and_transcribe(message):
+#     global active_users
+#     check_user_exist(message.from_user.id)
+#
+#     file_info = bot.get_file(message.voice.file_id)
+#     downloaded_file = bot.download_file(file_info.file_path)
+#
+#     last_voice_from_user = 'last_voice_from_user' + str(message.from_user.id) + '.wav'
+#
+#     with open(last_voice_from_user, 'wb') as new_file:
+#         new_file.write(downloaded_file)
+#
+#     # -----transcribe voice-----
+#     wav, sample_rate = torchaudio.load(last_voice_from_user)
+#     wav = wav[0]
+#     if sample_rate != 16000:
+#         trans = torchaudio.transforms.Resample(sample_rate, 16000, 'kaiser_window')
+#         wav = trans(wav)
+#     wav = wav.numpy()
+#     audios = [[last_voice_from_user, wav]]
+#
+#     Student_answer = asr(audios, 'file_inference')
+#     Student_answer = ' '.join([x[0] for x in Student_answer])
+#
+#     active_users[message.from_user.id]['Student_answer'] = Student_answer.lower()
+#     Student_answer = Student_answer.replace('com.', 'com')
+#     bot.send_message(message.chat.id, 'You mean: ' + Student_answer.lower(), parse_mode='html')
+#     # ----- -----
+#     # ----- -----
+#
+#     active_users[message.from_user.id]['Dialog'] = active_users[message.from_user.id][
+#                                                        'Dialog'] + '\n' + "Student" + ': ' + Student_answer
+#
+#     return Student_answer.lower()
+
+  ### ---------- Whisper Skyenga -----###
+
+
+def get_student_voice_and_transcribe(message):
+    global active_users
+
+
+    check_user_exist(message.from_user.id)
+
+    file_info = bot.get_file(message.voice.file_id)
+    downloaded_file = bot.download_file(file_info.file_path)
+
+    last_voice_from_user = 'last_voice_from_user' + str(message.from_user.id) + '.wav'
+
+    with open(last_voice_from_user, 'wb') as new_file:
+        new_file.write(downloaded_file)
+
+    ### ---------- Whisper Skyenga -----###
+    headers = {'Username': 'abc@gmail.com', 'apikey': '123-456', 'params': 'file_inference,-1'}
+    payload = [('file', downloaded_file)]
+    resp = requests.post("http://sel3-common-ml-2.skyeng.link:8001", files=payload, headers=headers)
+    resp = json.loads(resp.text)
+    Student_answer = ' '.join([x[0] for x in resp['result']])
+    #
+
+    active_users[message.from_user.id]['Student_answer'] = Student_answer.lower()
+    Student_answer = Student_answer.replace('com.', 'com')
+    bot.send_message(message.chat.id, 'You mean: ' + Student_answer.lower(), parse_mode='html')
+    # ----- -----
+    # ----- -----
+
+    active_users[message.from_user.id]['Dialog'] = active_users[message.from_user.id][
+                                                       'Dialog'] + '\n' + "Student" + ': ' + Student_answer
+
+    return Student_answer.lower()
+
+
+def get_student_voice_and_transcribe_wym(message):
+    global active_users
+    check_user_exist(message.from_user.id)
+
+    file_info = bot.get_file(message.voice.file_id)
+    downloaded_file = bot.download_file(file_info.file_path)
+
+    last_voice_from_user = 'last_voice_from_user' + str(message.from_user.id) + '.wav'
+
+    with open(last_voice_from_user, 'wb') as new_file:
+        new_file.write(downloaded_file)
+
+    # А теперь в виде API
+    headers = {'Username': 'abc@gmail.com', 'apikey': '123-456', 'params': 'file_inference,-1'}
+    payload = [('file', downloaded_file)]
+    resp = requests.post("http://sel3-common-ml-2.skyeng.link:8001", files=payload, headers=headers)
+    resp = json.loads(resp.text)
+    Student_answer = ' '.join([x[0] for x in resp['result']])
+    #
+
+    active_users[message.from_user.id]['Student_answer'] = Student_answer.lower()
+    Student_answer = Student_answer.replace('com.', 'com')
+    Student_answer = Student_answer.replace('at', '@')
+    Student_answer = Student_answer.replace(' ', '')
+    Student_answer = Student_answer.replace('dot', '.')
+    # bot.send_message(message.chat.id, 'You mean: ' + Student_answer.lower(), parse_mode='html')
+    # ----- -----
+    # ----- -----
+
+    active_users[message.from_user.id]['Dialog'] = active_users[message.from_user.id][
+                                                       'Dialog'] + '\n' + "Student" + ': ' + Student_answer
+
+    return Student_answer
+
+
+def get_student_voice_and_transcribe_at_like(message):
+    global active_users
+    check_user_exist(message.from_user.id)
+
+    # -----get voice-----
+    file_info = bot.get_file(message.voice.file_id)
+    downloaded_file = bot.download_file(file_info.file_path)
+
+    last_voice_from_user = 'last_voice_from_user' + str(message.from_user.id) + '.wav'
+
+    with open(last_voice_from_user, 'wb') as new_file:
+        new_file.write(downloaded_file)
+
+    last_voice_from_user = 'last_voice_from_user' + str(message.from_user.id) + '.wav'
+
+    # -----transcribe voice-----
+    headers = {'Username': 'abc@gmail.com', 'apikey': '123-456', 'params': 'file_inference,-1,-1'}
+    payload = [('file', downloaded_file)]
+    resp = requests.post("http://sel3-common-ml-2.skyeng.link:8001", files=payload, headers=headers)
+
+    resp = json.loads(resp.text)
+    result = ' '.join([x[0] for x in resp['result']])
+    Student_answer = result
+    Student_answer = Student_answer.replace('at', '@')
+    Student_answer = Student_answer.replace(' ', '')
+    Student_answer = Student_answer.replace('dot', '.')
+    bot.send_message(message.chat.id, 'you mean: ' + Student_answer.lower(), parse_mode='html')
+    # ----- -----
+
+    active_users[message.from_user.id]['Dialog'] = active_users[message.from_user.id][
+                                                       'Dialog'] + '\n' + "Student" + ': ' + Student_answer.lower()
+
+    return Student_answer.lower()
+
+
+def next_recommended_comment_by_GPT(Main_prompt, Dialog):
+    Dialog = Dialog + '\n' + 'Alice: '
+    prompt = Main_prompt + Dialog
+    try:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=150, stop='\n',
+                                            top_p=0.25)
+    except:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=250, stop='\n',
+                                            top_p=0.25)
+    response_text_string = response['choices'][0]['text']
+    return response_text_string
+
+
+def check_student_answer(Dialog):
+    pre_prompt = '''You are a teacher, your student is trying to pronounce the word at correctly, pronounces another word or it is unclear.
+    Ask the person to be more attentive and repeat the word more clearly.
+    Every time you ask a student to pronounce a word, use different formulations, do not duplicate phrases
+'''
+    prompt = pre_prompt + '\n' + Dialog + '\n' + 'Comment: ' + '\n'
+    try:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=150, stop='\n',
+                                            top_p=0.25)
+    except:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=250, stop='\n',
+                                            top_p=0.25)
+    response_text_string = response['choices'][0]['text']
+    return response_text_string
+
+
+def check_student_said_at(Answer):
+    pre_prompt = ''' 
+    You are a teacher, your student is trying to to pronounce "at". If he wrong — give recommendations dor him about pronounce
+    '''
+
+    prompt = pre_prompt + '\n Student:' + Answer + '\n' + 'Comment: ' + '\n'
+
+    try:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=150, stop='\n',
+                                            top_p=0.25)
+    except:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=250, stop='\n',
+                                            top_p=0.25)  # max_tokens=5
+    response_text_string = response['choices'][0]['text']
+    return response_text_string
+
+
+def check_student_said_sky_correct(Answer):
+    pre_prompt = ''' 
+You are a teacher, your student is trying to pronounce email. 
+Main sign in email: @ sign like "at" and '.'
+If he says "at" praise him, if he doesn't say "at" say that you didn't hear him pronouncing this email, ask him to practice more.
+Every time you talk to a student, use different formulations, do not duplicate phrases
+
+Ask maybe talk more clearly ann from silence space
+
+    '''
+
+    prompt = pre_prompt + '\n Student:' + Answer + '\n' + 'Comment: ' + '\n'
+
+    try:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=150, stop='\n',
+                                            top_p=0.25)
+    except:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=250, stop='\n',
+                                            top_p=0.25)  # max_tokens=5
+    response_text_string = response['choices'][0]['text']
+    return response_text_string
+
+
+def check_student_said_antoshka(Answer):
+    pre_prompt = ''' 
+    You are a teacher, your student is trying to to pronounce "sky@gmail.com"
+
+    Check if he does it correctly and say if he is right or wrong.
+
+    If he is right:Praise him in a way that supports and motivates.
+    Every time you do this, use different formulations, do not duplicate phrases
+    If he is wrong:
+    Explain where is the mistake. Ask the person to be more attentive and  ask him to do the task again.
+    Every time you do this, use different formulations, do not duplicate phrases
+
+    '''
+
+    prompt = pre_prompt + '\n Student:' + Answer + '\n' + 'Comment: ' + '\n'
+
+    try:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=150, stop='\n',
+                                            top_p=0.25)
+    except:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=250, stop='\n',
+                                            top_p=0.25)  # max_tokens=5
+    response_text_string = response['choices'][0]['text']
+    return response_text_string
+
+
+def check_student_said_antoshka_text(Answer):
+    pre_prompt = ''' You are a teacher, your student is trying to write his mail.
+    if the student used "@" and "." in his email, if correctly praise him
+'''
+    prompt = pre_prompt + '\n Student:' + Answer + '\n' + 'Comment: ' + '\n'
+
+    try:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=150, stop='\n',
+                                            top_p=0.25)
+    except:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=250, stop='\n',
+                                            top_p=0.25)  # max_tokens=5
+    response_text_string = response['choices'][0]['text']
+    return response_text_string
+
+def promt_for_finish_at_theme(Answer):
+    pre_prompt = ''' Your student completed the lesson. Praise him and offer to move on to the next lesson'''
+    prompt = pre_prompt + '\n Student:' + Answer + '\n' + 'Comment: ' + '\n'
+
+    try:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=150, stop='\n',
+                                            top_p=0.25)
+    except:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=250, stop='\n',
+                                            top_p=0.25)  # max_tokens=5
+    response_text_string = response['choices'][0]['text']
+    return response_text_string
+
+def check_student_test(Answer):
+    pre_prompt = ''' 
+    You are a teacher, your student is doing a test. He chooses the must choose "at_finish" 
+    if he wrobg ask the person to be more attentive and try to try once again. 
+    Every time you ask a student to do it, use different formulations, do not duplicate phrases
+'''
+
+    prompt = pre_prompt + '\n Student:' + Answer + '\n' + 'Comment: ' + '\n'
+
+    try:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=150, stop='\n',
+                                            top_p=0.25)
+    except:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=250, stop='\n',
+                                            top_p=0.25)
+    response_text_string = response['choices'][0]['text']
+    return response_text_string
+
+
+def check_student_time_0(Answer):
+    pre_prompt = ''' 
+    You are a teacher, your student is trying to twelve o'clock
+    Student should use "it's" too
+    Check if he does it correctly and say if he is right or wrong.
+
+
+    If he is right:Praise him in a way that supports and motivates.
+    Every time you do this, use different formulations, do not duplicate phrases
+
+
+    If he is wrong:
+    Explain where is the mistake. Ask the person to be more attentive and  ask him to do the task again.
+    Every time you do this, use different formulations, do not duplicate phrases
+
+'''
+
+    prompt = pre_prompt + '\n Student:' + Answer + '\n' + 'Comment: ' + '\n'
+
+    try:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=150, stop='\n',
+                                            top_p=0.25)
+    except:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=250, stop='\n',
+                                            top_p=0.25)
+    response_text_string = response['choices'][0]['text']
+
+    return response_text_string
+
+
+def check_student_time_1(Answer, Question):
+    pre_prompt = ''' 
+    You are a teacher, your student is trying it's five past twelve
+    Student should use "it's" too
+
+    Check if he does it correctly and say if he is right or wrong.
+
+
+    If he is right:Praise him in a way that supports and motivates.
+    Every time you do this, use different formulations, do not duplicate phrases
+
+
+    If he is wrong:
+    Explain where is the mistake. Ask the person to be more attentive and  ask him to do the task again.
+    Every time you do this, use different formulations, do not duplicate phrases
+
+'''
+
+    prompt = pre_prompt + '\n' + Question + '\n Student:' + Answer + '\n' + 'You: ' + '\n'
+
+    try:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=150, stop='\n',
+                                            top_p=0.25)
+    except:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=250, stop='\n',
+                                            top_p=0.25)
+    response_text_string = response['choices'][0]['text']
+    return response_text_string
+
+
+def check_student_time_2(Answer, Question):
+    pre_prompt = ''' 
+    You are a teacher, your student is trying half past twelve
+    Student should use "it's" too
+    Check if he does it correctly and say if he is right or wrong.
+
+
+    If he is right:Praise him in a way that supports and motivates.
+    Every time you do this, use different formulations, do not duplicate phrases
+
+
+    If he is wrong:
+    Explain where is the mistake. Ask the person to be more attentive and  ask him to do the task again.
+    Every time you do this, use different formulations, do not duplicate phrases
+
+'''
+
+    prompt = pre_prompt + '\n' + Question + '\n Student:' + Answer + '\n' + 'You: ' + '\n'
+
+    try:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=150, stop='\n',
+                                            top_p=0.25)
+    except:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=250, stop='\n',
+                                            top_p=0.25)
+    response_text_string = response['choices'][0]['text']
+    return response_text_string
+
+
+def check_student_time_4(Answer, Question):
+    pre_prompt = ''' 
+    You are a teacher, your student is trying "twenty-nine to one" or he can write "it's 29 to 1" it's ok
+    Student should use "it's" too
+    Check if he does it correctly and say if he is right or wrong.
+
+
+    If he is right: Praise him in a way that supports and motivates.
+    Every time you do this, use different formulations, do not duplicate phrases
+
+
+    If he is wrong:
+    Explain where is the mistake. Ask the person to be more attentive and  ask him to do the task again.
+    Every time you do this, use different formulations, do not duplicate phrases
+
+'''
+
+    prompt = pre_prompt + '\n' + Question + '\n Student:' + Answer + '\n' + 'You: ' + '\n'
+
+    try:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=150, stop='\n',
+                                            top_p=0.25)
+    except:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=250, stop='\n',
+                                            top_p=0.25)
+    response_text_string = response['choices'][0]['text']
+    return response_text_string
+
+
+def check_student_time_6_7(Answer):
+    pre_prompt = ''' 
+The teacher taught students the topic "Telling time",  they learned how to say "It's... o'clock, to, past, half past.
+Now you need to check the answers of the students who tell the time and give them feedback.
+Important:
+1. Every time must start with "It's"
+2.Only twelve - hour format is possible 
+3. When the number of minutes in more than 31, the student must say " It's + number of minutes + to + hour"
+4.When the number of minutes in from 1 to 29 the student must say " It's + number of minutes + past+ hour"
+5. When the number of minutes in 30, the student must say " It's + half + past + hour"
+6. When the number of minutes in 00, the student must say " It's + number of hours+ o'clock"
+
+
+Example:
+12:00- it's twelve o'clock
+13:01 - it's one past one
+15:30 it's half past three
+13:31 it's twenty-nine to two
+19:45- it's fifteen to eight
+
+Praise a student when he tells time in the right format, correct him and motivate him that the other time it'll be better if he is attentive.
+13:00
+student: it's one o'clock
+you:  Well done! You remembered to say "It's" and you got the time right.
+15:18
+student: eighteen past three
+you: That's close! It's actually fifteen past three. Keep practicing and you'll get it right next time.
+12:31
+student: It's twenty-eight to one
+you:    Not quite right. It's correct to say it's twenty-nine to one
+13:31
+student: it's twenty-nine to two
+you: That's correct! Well done!
+14:31
+student: it's 28 to three
+you: Almost right! It's actually twenty-nine to three. 
+
+12:16
+student: twelve sixty
+you: 
+Not quite right. It's correct to say it's sixteen past twelve.
+
+
+12:16
+student: one two one six 
+you: 
+Not quite right. It's correct to say it's sixteen past twelve.
+
+
+15:56
+student: four to four
+you: 
+Not quite right. It's correct to say it's four to sixteen.  
+
+
+08:56
+student:  four to nine
+you:
+Not quite right. It's correct to say it's four to nine. 
+
+
+08:56
+student: it's  four to nine
+you: 
+
+That's correct! Well done! 
+
+15:56 
+student: it's four to sixteen 
+you: No, you should you twelve - hour format. So the correct version is it's four to four
+
+'''
+
+    prompt = pre_prompt + '\n Student:' + Answer + '\n' + 'Comment: ' + '\n'
+
+    try:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=150, stop='\n',
+                                            top_p=0.25)
+    except:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=250, stop='\n',
+                                            top_p=0.25)
+    response_text_string = response['choices'][0]['text']
+    return response_text_string
+
+
+def check_student_time_7(Answer, Question):
+    pre_prompt = ''' The teacher taught students the topic "Telling time",  they learned how to say "It's... o'clock, to, past, half past.
+Now you need to check the answers of the students who tell the time and give them feedback.
+Important:
+1. Every time must start with "It's"
+2.Only twelve - hour format is possible 
+3. When the number of minutes in more than 31, the student must say " It's + number of minutes + to + hour"
+4.When the number of minutes in from 1 to 29 the student must say " It's + number of minutes + past+ hour"
+5. When the number of minutes in 30, the student must say " It's + half + past + hour"
+6. When the number of minutes in 00, the student must say " It's + number of hours+ o'clock"
+
+
+Example:
+12:00- it's twelve o'clock
+13:01 - it's one past one
+15:30 it's half past three
+13:31 it's twenty-nine to two
+19:45- it's fifteen to eight
+
+Praise a student when he tells time in the right format, correct him and motivate him that the other time it'll be better if he is attentive.
+13:00
+student: it's one o'clock
+you:  Well done! You remembered to say "It's" and you got the time right.
+15:18
+student: eighteen past three
+you: That's close! It's actually fifteen past three. Keep practicing and you'll get it right next time.
+12:31
+student: It's twenty-eight to one
+you:    Not quite right. It's correct to say it's twenty-nine to one
+13:31
+student: it's twenty-nine to two
+you: That's correct! Well done!
+14:31
+student: it's 28 to three
+you: Almost right! It's actually twenty-nine to three. 
+
+12:16
+student: twelve sixty
+you: 
+Not quite right. It's correct to say it's sixteen past twelve.
+
+
+12:16
+student: one two one six 
+you: 
+Not quite right. It's correct to say it's sixteen past twelve.
+
+
+15:56
+student: four to four
+you: 
+Not quite right. It's correct to say it's four to sixteen.  
+
+
+08:56
+student:  four to nine
+you:
+Not quite right. It's correct to say it's four to nine. 
+
+
+08:56
+student: it's  four to nine
+you: 
+
+That's correct! Well done! 
+
+15:56 
+student: it's four to sixteen 
+you: No, you should use twelve - hour format. So the correct version is it's four to four
+
+'''
+
+    prompt = pre_prompt + '\n' + Question + '\n Student:' + Answer + '\n' + 'You: ' + '\n'
+
+    try:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=150, stop='\n',
+                                            top_p=0.25)
+    except:
+        response = openai.Completion.create(engine="text-davinci-003", prompt=prompt, max_tokens=250, stop='\n',
+                                            top_p=0.25)
+    response_text_string = response['choices'][0]['text']
+    return response_text_string
+
+def save_to_db(conversationId: str,
+               userId: str,
+               userName: str,
+               isStudent: int,
+               userSpeechRecordedAt: int,
+               userSpeechRecordFormat: str,
+               # userSpeech: str,
+               userSpeechRecordPath: str,
+               userSpeechRecordFileName: str
+               ):
+    try:
+        data = {
+            'conversationId': conversationId,
+            'userId': userId,
+            'userName': userName,
+            'isStudent': isStudent,
+            'userSpeechRecordedAt': userSpeechRecordedAt,
+            'userSpeechRecordFormat': userSpeechRecordFormat,
+            # 'userSpeech': userSpeech,
+        }
+        files = {
+            'userSpeechRecord': (userSpeechRecordFileName, open(userSpeechRecordPath, 'rb'))
+        }
+        response = requests.post(
+            'https://speech-mistakes-analysis.skyeng.ru/server-api/v1/speech-analyser/save-data-from-tg-bot',
+            data=data,
+            files=files,
+        )
+    except Exception as e:
+        print('An exception occurred: {}'.format(e))
+
+
+# параллельный юз
+def check_user_exist(user_id):
+    global active_users
+
+    try:
+        active_users[user_id]
+    except:
+        active_users[user_id] = {
+            'Dialog': '',
+            'Student_answer': '',
+            'Bot_last_comment': '',
+            'Student_last_comment': '',
+            'State': 'Please, use command / start or wait the answer',
+            'Main_prompt': '',
+            'save_path': '',
+            'temp': '',
+            'Question': '',
+
+        }
+    return
+
+
+
+
+# @title бот
+bot = telebot.TeleBot('6025821030:AAEnpS521fdt7aQJxwzGEc-Fxvj5jGDje3w')
+active_users = {}
+
+
+# Вводим стартовую кнопку, которая поведет на какое-то из уроков
+@bot.message_handler(commands=['start'])
+def welcome(message):
+    print(message.from_user.id)
+    check_user_exist(message.from_user.id)
+    bot.send_message(message.chat.id,
+                     '''Hey {0.first_name}! 👋🏼 \nI see you are eager to start a lesson!🚀\nGreat Idea!\nChoose a lesson you want to start with\n
+                     ⏰ click <b>/time</b> for time lesson \n 📧 click <b>/email</b> for email lesson'''.format(
+                         message.from_user, bot.get_me()), parse_mode='html')
+
+
+@bot.message_handler(commands=['time'])
+def lesson_time(message):
+    print(message.from_user.id)
+    global active_users
+    check_user_exist(message.from_user.id)
+    # 1 сообщение
+    start_message_part1 = '''Telling a time? Perfect! Let 's hit the road!🤟🏼
+    '''
+    bot.send_message(message.chat.id, start_message_part1, parse_mode='html')
+    # 1.1 сообщение
+    image_url = "https://oneminuteenglish.org/wp-content/uploads/2020/05/ten-past-1.png"
+    response = requests.get(image_url)
+    image = response.content
+    bot.send_photo(message.chat.id, image, parse_mode='html')
+    # 2 сообщение
+    start_message_part2 = '''Read more information about this topic in''' + '<a href="https://magazine.skyeng.ru/kak-na-samom-dele-pravilno-nazyvat-vremja-na-anglijskom/"> <b>the article in Skyeng Magazine</b></a>'
+    bot.send_message(message.chat.id, start_message_part2, parse_mode='html')
+    # 2.2  сообщение
+    start_message_yt = '''Look the best explanation of the topic''' + '<a href="https://www.youtube.com/watch?v=AyAQfTxGyqI/"> <b>on YouTube channel attentively!</b></a>'
+    bot.send_message(message.chat.id, start_message_yt, parse_mode='html')
+    # 2.2  сообщение
+    start_message_yt = '''❗️Watch the video on youtube!\nAnd come back here, complete tasks for new knowledge '''
+    bot.send_message(message.chat.id, start_message_yt, parse_mode='html')
+    # 3 сообщение
+    # time.sleep(60)
+    start_message_part3 = '''🔥 Now let's practise!\n<b>Listen and repeat after me</b>'''
+    bot.send_message(message.chat.id, start_message_part3, parse_mode='html')
+    # 4 сообщение
+    start_message_4 = '''12:00 — It's twelve o'clock'''
+    bot.send_message(message.chat.id, start_message_4, parse_mode='html')
+    # голосовое
+    message_5 = '''It's twelve o'clock'''
+    active_users[message.from_user.id]['Dialog'] = active_users[message.from_user.id][
+                                                       'Dialog'] + '\n' + 'Alice: ' + message_5
+    send_message_as_a_voice(message, message_5, "facebook")
+    # экшн
+    start_message_6 = '''Record your voice message to show how you repeat 🎙'''
+    bot.send_message(message.chat.id, start_message_6, parse_mode='html')
+    active_users[message.from_user.id]['State'] = 'time_0'
+
+
+@bot.message_handler(commands=['email'])
+def lesson_time(message):
+    print(message.from_user.id)
+    global active_users
+    check_user_exist(message.from_user.id)
+    print(message.from_user.id)
+    check_user_exist(message.from_user.id)
+    # 1 сообщение
+    start_message_part1 = '''How to say "@"? Perfect! Let 's hit the road!🤟🏼
+    '''
+    bot.send_message(message.chat.id, start_message_part1, parse_mode='html')
+    # 2 сообщение
+    start_message_part2 = '''
+      🗯 Word: "@" — at
+      🔹Transcription: [æt]
+      🔹Meaning: (computing) the symbol (@) used in email addresses 
+      🔹Translation: -
+      ⚡️Level: A1'''
+    bot.send_message(message.chat.id, start_message_part2, parse_mode='html')
+    # голосовое ЭТ
+    start_message_part3 = 'at'
+
+    active_users[message.from_user.id]['Dialog'] = active_users[message.from_user.id][
+                                                       'Dialog'] + '\n' + 'Alice: ' + start_message_part3
+    send_message_as_a_voice(message, start_message_part3, "facebook")
+
+    # говорим ученику повторить ЭТ
+    start_message_talk = '''Listen how to pronounce <b>"@"</b>\n<b>Repeat after me 🤟🏼</b>
+    '''
+    bot.send_message(message.chat.id, start_message_talk, parse_mode='html')
+    active_users[message.from_user.id]['State'] = 'at_0_at'
+
+
+@bot.message_handler(content_types=['voice'])
+def voice_processing(message):
+    global active_users
+    print(message)
+    print(active_users)
+    check_user_exist(message.from_user.id)
+    print(active_users)
+    # bot.send_message(message.chat.id, active_users[message.from_user.id]['State'], parse_mode='html')
+    # ---- ветка когда студент озвучивает "at"
+    if active_users[message.from_user.id]['State'] == 'at_0_at':
+        Student_answer = get_student_voice_and_transcribe_wym(message)
+        # БД
+        save_to_db(
+            conversationId=str(message.chat.id) + "-angelina",
+            userId=message.from_user.id,
+            userName=message.from_user.username,
+            isStudent=1,
+            userSpeechRecordedAt=int(time.time()),
+            userSpeechRecordFormat='wav',
+            # userSpeech=Student_answer,
+            userSpeechRecordPath='last_voice_from_user' + str(message.from_user.id) + '.wav',
+            userSpeechRecordFileName='last_voice_from_user' + str(message.from_user.id) + '.wav',
+        )
+        # ----- БД
+        comment_from_GPT = check_student_said_at(Student_answer)
+        print("comment_from_GPT")
+        print(comment_from_GPT)
+        send_message_as_a_voice(message, comment_from_GPT, "facebook")
+        active_users[message.from_user.id]['State'] = 'at_1_sky'
+        start_message_part4 = '''Let's have some practice! Record voice, say email below: \n<b>sky@gmail.com </b> 🎙'''
+        bot.send_message(message.chat.id, start_message_part4, parse_mode='html')
+
+    elif active_users[message.from_user.id]['State'] == 'at_1_sky':
+        # ветка когда студент озвучивает емейл sky.gmail
+
+        Student_answer = get_student_voice_and_transcribe_wym(message)
+        print('Student_answer:')
+        print(Student_answer)
+        # БД
+        save_to_db(
+            conversationId=str(message.chat.id) + "-angelina",
+            userId=message.from_user.id,
+            userName=message.from_user.username,
+            isStudent=1,
+            userSpeechRecordedAt=int(time.time()),
+            userSpeechRecordFormat='wav',
+            # userSpeech=Student_answer,
+            userSpeechRecordPath='last_voice_from_user' + str(message.from_user.id) + '.wav',
+            userSpeechRecordFileName='last_voice_from_user' + str(message.from_user.id) + '.wav',
+        )
+        # ----- БД
+        comment_from_GPT = check_student_said_sky_correct(Student_answer)
+        print("comment_from_GPT")
+        print(comment_from_GPT)
+        send_message_as_a_voice(message, comment_from_GPT, "facebook")
+        if re.search(".+?@.+?(\.|dot).+?", Student_answer.lower()):
+
+            active_users[message.from_user.id]['State'] = 'at_3_text_email'
+            start_message_part33 = '''✅'''
+            bot.send_message(message.chat.id, start_message_part33, parse_mode='html')
+            start_message_part4 = ''' Next task 🔥:\n<b>What's your email? 🖌 Write it using "@", please</b>'''
+            bot.send_message(message.chat.id, start_message_part4, parse_mode='html')
+        else:
+            start_message_part4 = '''❌'''
+            bot.send_message(message.chat.id, start_message_part4, parse_mode='html')
+
+
+    elif active_users[message.from_user.id]['State'] == 'at_3_text_email':
+        # ветка когда студент озвучивает емейл sky.gmail
+        Student_answer = get_student_voice_and_transcribe_wym(message)
+        # БД
+        save_to_db(
+            conversationId=str(message.chat.id) + "-angelina",
+            userId=message.from_user.id,
+            userName=message.from_user.username,
+            isStudent=1,
+            userSpeechRecordedAt=int(time.time()),
+            userSpeechRecordFormat='mp3',
+            # userSpeech=Student_answer,
+            userSpeechRecordPath='last_voice_from_user' + str(message.from_user.id) + '.wav',
+            userSpeechRecordFileName='last_voice_from_user' + str(message.from_user.id) + '.wav',
+            # userSpeechRecordPath =  "last_voice_from_user" + str(message.from_user.id) + ".wav",
+            # userSpeechRecordFileName = "last_voice_from_user" + str(message.from_user.id) + ".wav",
+        )
+        # ----- БД
+        comment_from_GPT = check_student_said_sky_correct(Student_answer)
+        send_message_as_a_voice(message, comment_from_GPT, "facebook")
+        start_message_eror = 'Please write your email, in this task you need to write exactly, not recording'
+        active_users[message.from_user.id]['Dialog'] = active_users[message.from_user.id][
+                                                           'Dialog'] + '\n' + 'Alice: ' + start_message_eror
+        send_message_as_a_voice(message, start_message_eror, "murf")
+
+
+    elif active_users[message.from_user.id]['State'] == 'at_4_own_email_voice':
+        # ветка когда студент озвучивает сам емейл
+        Student_answer = get_student_voice_and_transcribe_wym(message)
+        # БД
+        save_to_db(
+            conversationId=str(message.chat.id) + "-angelina",
+            userId=message.from_user.id,
+            userName=message.from_user.username,
+            isStudent=1,
+            userSpeechRecordedAt=int(time.time()),
+            userSpeechRecordFormat='wav',
+            # userSpeech=Student_answer,
+            userSpeechRecordPath='last_voice_from_user' + str(message.from_user.id) + '.wav',
+            userSpeechRecordFileName='last_voice_from_user' + str(message.from_user.id) + '.wav',
+        )
+        # ----- БД
+
+        comment_from_GPT = check_student_said_sky_correct(Student_answer)
+        send_message_as_a_voice(message, comment_from_GPT, "facebook")
+        if re.search(".+?@.+?(\.|dot).+?", Student_answer.lower()):
+            active_users[message.from_user.id]['State'] = 'at_6_test'
+            start_message = '''✅'''
+            bot.send_message(message.chat.id, start_message, parse_mode='html')
+            bot.send_message(message.chat.id,
+                             text='''Well done! Let's check how you got it😏\nChoose what e-mail I will say:''',
+                             parse_mode='html')
+            message_it = ' bootcamp@gmail.com'
+            active_users[message.from_user.id]['Dialog'] = active_users[message.from_user.id][
+                                                               'Dialog'] + '\n' + 'Alice: ' + message_it
+            send_message_as_a_voice(message, message_it, "facebook")
+
+            # Отправляем текст в Телеграм
+            bot.send_message(message.chat.id,
+                             text='''What number of the right e-mail? Write 1, 2 or 3? 👇🏻\n 1. bootcampatgmail.com\n 2. bootcamp.at@gmail.com\n 3. bootcamp@gmail.com''',
+                             parse_mode='html')
+
+        else:
+            start_message_part4 = '''Please, listen again'''
+            bot.send_message(message.chat.id, start_message_part4, parse_mode='html')
+
+
+    elif active_users[message.from_user.id]['State'] == 'time_0':
+        # ветка когда студент озвучивает емейл sky.gmail
+        Student_answer = get_student_voice_and_transcribe(message)
+        # БД
+        save_to_db(
+            conversationId=str(message.chat.id) + "-angelina",
+            userId=message.from_user.id,
+            userName=message.from_user.username,
+            isStudent=1,
+            userSpeechRecordedAt=int(time.time()),
+            userSpeechRecordFormat='wav',
+            # userSpeech=Student_answer,
+            userSpeechRecordPath='last_voice_from_user' + str(message.from_user.id) + '.wav',
+            userSpeechRecordFileName='last_voice_from_user' + str(message.from_user.id) + '.wav',
+        )
+        # ----- БД
+        comment_from_GPT = check_student_time_0(Student_answer)
+        send_message_as_a_voice(message, comment_from_GPT, "facebook")
+        if re.search(".+?(12|twelve).+?(o'clock|)+?", Student_answer.lower()):
+
+            active_users[message.from_user.id]['State'] = 'time_1'
+            start_message = '''✅'''
+            bot.send_message(message.chat.id, start_message, parse_mode='html')
+            active_users[message.from_user.id]['Question'] = ''' Next task 🔥\nRecord voice, say: <b>12:05 — It's five past twelve 🎙</b>'''
+            bot.send_message(message.chat.id, active_users[message.from_user.id]['Question'], parse_mode='html')
+
+        else:
+            start_message_part4 = '''❌\nRecord your message once again'''
+            bot.send_message(message.chat.id, start_message_part4, parse_mode='html')
+
+    elif active_users[message.from_user.id]['State'] == 'time_1':
+        # ветка когда студент озвучивает емейл sky.gmail
+        Student_answer = get_student_voice_and_transcribe(message)
+        # БД
+        save_to_db(
+            conversationId=str(message.chat.id) + "-angelina",
+            userId=message.from_user.id,
+            userName=message.from_user.username,
+            isStudent=1,
+            userSpeechRecordedAt=int(time.time()),
+            userSpeechRecordFormat='wav',
+            # userSpeech=Student_answer,
+            userSpeechRecordPath='last_voice_from_user' + str(message.from_user.id) + '.wav',
+            userSpeechRecordFileName='last_voice_from_user' + str(message.from_user.id) + '.wav',
+        )
+        # ----- БД
+        comment_from_GPT = check_student_time_1(Student_answer, active_users[message.from_user.id]['Question'])
+        send_message_as_a_voice(message, comment_from_GPT, "facebook")
+
+        # if re.search(".+?(it's|it).+?(5|five).+?(past).+?(12|twelve).+?", Student_answer.lower()):
+        if re.search("(5|five).+?(past).+?", Student_answer.lower()):
+
+            active_users[message.from_user.id]['State'] = 'time_2'
+            start_message = '''💣'''
+            bot.send_message(message.chat.id, start_message, parse_mode='html')
+            active_users[message.from_user.id]['Question'] = ''' Next\n<b>12:30 - It's half past twelve 🎙</b>'''
+            bot.send_message(message.chat.id, active_users[message.from_user.id]['Question'], parse_mode='html')
+        else:
+            start_message_part4 = '''❌\nRecord your message once again'''
+            bot.send_message(message.chat.id, start_message_part4, parse_mode='html')
+
+
+    elif active_users[message.from_user.id]['State'] == 'time_2':
+        # ветка когда студент озвучивает емейл sky.gmail
+        Student_answer = get_student_voice_and_transcribe(message)
+        # БД
+        save_to_db(
+            conversationId=str(message.chat.id) + "-angelina",
+            userId=message.from_user.id,
+            userName=message.from_user.username,
+            isStudent=1,
+            userSpeechRecordedAt=int(time.time()),
+            userSpeechRecordFormat='wav',
+            # userSpeech=Student_answer,
+            userSpeechRecordPath='last_voice_from_user' + str(message.from_user.id) + '.wav',
+            userSpeechRecordFileName='last_voice_from_user' + str(message.from_user.id) + '.wav',
+        )
+        # ----- БД
+        comment_from_GPT = check_student_time_2(Student_answer, active_users[message.from_user.id]['Question'])
+        send_message_as_a_voice(message, comment_from_GPT, "facebook")
+        if re.search(".+?(it's )|(half )|(past )|.+?^|12|twelve|", Student_answer.lower()):
+            active_users[message.from_user.id]['State'] = 'time_3'
+            start_message = '''💣'''
+            bot.send_message(message.chat.id, start_message, parse_mode='html')
+            active_users[message.from_user.id]['Question'] = ''' Next\n<b>12:31 - It's twenty-nine to one</b>\nRecord your voice message to show how you repeat 🎙'''
+            bot.send_message(message.chat.id, active_users[message.from_user.id]['Question'], parse_mode='html')
+        else:
+            start_message_part4 = '''❌\nRecord your message once again'''
+            bot.send_message(message.chat.id, start_message_part4, parse_mode='html')
+
+
+    elif active_users[message.from_user.id]['State'] == 'time_3':
+        # ветка когда студент озвучивает емейл sky.gmail
+        Student_answer = get_student_voice_and_transcribe(message)
+        # БД
+        save_to_db(
+            conversationId=str(message.chat.id) + "-angelina",
+            userId=message.from_user.id,
+            userName=message.from_user.username,
+            isStudent=1,
+            userSpeechRecordedAt=int(time.time()),
+            userSpeechRecordFormat='wav',
+            # userSpeech=Student_answer,
+            userSpeechRecordPath='last_voice_from_user' + str(message.from_user.id) + '.wav',
+            userSpeechRecordFileName='last_voice_from_user' + str(message.from_user.id) + '.wav',
+        )
+        # ----- БД
+
+        comment_from_GPT = check_student_time_4(Student_answer, active_users[message.from_user.id]['Question'])
+        send_message_as_a_voice(message, comment_from_GPT, "facebook")
+        if re.search("^it.+?|(29|twelve) |1|one|", Student_answer.lower()):
+            start_message = '''✅'''
+            bot.send_message(message.chat.id, start_message, parse_mode='html')
+            active_users[message.from_user.id]['State'] = 'time_4'
+            messages_000 = ['🎙👉🏻 11:00', '🎙👉🏻 14:00', '🎙👉🏻 23:00', '🎙👉🏻 04:00', '🎙👉🏻 12:00', '🎙👉🏻 22:00', '🎙👉🏻 13:00',
+                            '🎙👉🏻 15:00', '🎙👉🏻 04:00', '🎙👉🏻 19:00', '🎙👉🏻 18:00', '🎙👉🏻 20:00', '🎙👉🏻 21:00', '🎙👉🏻 16:00',
+                            '🎙👉🏻 17:00']
+            active_users[message.from_user.id]['Question'] = random.choice(messages_000)
+            bot.send_message(message.chat.id, active_users[message.from_user.id]['Question'], parse_mode='html')
+        else:
+            message_repeat = '''❌\nRecord your message once again'''
+            bot.send_message(message.chat.id, message_repeat, parse_mode='html')
+
+
+
+    elif active_users[message.from_user.id]['State'] == 'time_4':
+        #
+        Student_answer = get_student_voice_and_transcribe(message)
+
+        # БД
+        save_to_db(
+            conversationId=str(message.chat.id) + "-angelina",
+            userId=message.from_user.id,
+            userName=message.from_user.username,
+            isStudent=1,
+            userSpeechRecordedAt=int(time.time()),
+            userSpeechRecordFormat='wav',
+            # userSpeech=Student_answer,
+            userSpeechRecordPath='last_voice_from_user' + str(message.from_user.id) + '.wav',
+            userSpeechRecordFileName='last_voice_from_user' + str(message.from_user.id) + '.wav',
+        )
+        # ----- БД
+
+        comment_from_GPT = check_student_time_7(Student_answer, active_users[message.from_user.id]['Question'])
+        send_message_as_a_voice(message, comment_from_GPT, "facebook")
+        if re.search("", Student_answer.lower()):
+            start_message = '''💣'''
+            bot.send_message(message.chat.id, start_message, parse_mode='html')
+            active_users[message.from_user.id]['State'] = 'time_5'
+            messages_000 = ['🎙👉🏻 11:00', '🎙👉🏻 14:00', '🎙👉🏻 23:00', '🎙👉🏻 04:00', '🎙👉🏻 12:00', '🎙👉🏻 22:00', '🎙👉🏻 13:00',
+                            '🎙👉🏻 15:00', '🎙👉🏻 04:00', '🎙👉🏻 19:00', '🎙👉🏻 18:00', '🎙👉🏻 20:00', '🎙👉🏻 21:00', '🎙👉🏻 16:00',
+                            '🎙👉🏻 17:00']
+            active_users[message.from_user.id]['Question'] = random.choice(messages_000)
+            bot.send_message(message.chat.id, active_users[message.from_user.id]['Question'], parse_mode='html')
+
+        else:
+            start_message_part4 = '''❌\nRecord your message once again'''
+            bot.send_message(message.chat.id, start_message_part4, parse_mode='html')
+
+
+    elif active_users[message.from_user.id]['State'] == 'time_5':
+        #
+        Student_answer = get_student_voice_and_transcribe(message)
+
+        # БД
+        save_to_db(
+            conversationId=str(message.chat.id) + "-angelina",
+            userId=message.from_user.id,
+            userName=message.from_user.username,
+            isStudent=1,
+            userSpeechRecordedAt=int(time.time()),
+            userSpeechRecordFormat='wav',
+            # userSpeech=Student_answer,
+            userSpeechRecordPath='last_voice_from_user' + str(message.from_user.id) + '.wav',
+            userSpeechRecordFileName='last_voice_from_user' + str(message.from_user.id) + '.wav',
+        )
+        # ----- БД
+
+        comment_from_GPT = check_student_time_7(Student_answer, active_users[message.from_user.id]['Question'])
+        send_message_as_a_voice(message, comment_from_GPT, "facebook")
+        if re.search("", Student_answer.lower()):
+            active_users[message.from_user.id]['State'] = 'time_6'
+            start_message = '''💣'''
+            bot.send_message(message.chat.id, start_message, parse_mode='html')
+            random_time_9 = ["01:01", "01:02", "01:03", "01:04", "01:05", "01:06", "01:07", "01:08",
+                             "01:09", "01:10", "01:11", "01:12", "01:13", "01:14", "01:15", "01:16",
+                             "01:17", "01:18", "01:19", "01:20", "01:21", "19:19", "19:20", "19:21",
+                             "19:22", "19:23", "19:24", "19:25", "19:26", "19:27", "19:28", "19:29",
+                             "23:11", "23:12", "23:13", "23:14", "23:15", "23:16", "23:17", "23:18",
+                             "23:19", "23:20"]
+            active_users[message.from_user.id]['Question'] = random.choice(random_time_9)
+            bot.send_message(message.chat.id, '🎙👉🏻 Record voice: ' + active_users[message.from_user.id]['Question'], parse_mode='html')
+
+        else:
+            start_message_part4 = '''Please, repeat the theory!\nRecord your message once again'''
+            bot.send_message(message.chat.id, start_message_part4, parse_mode='html')
+
+
+    elif active_users[message.from_user.id]['State'] == 'time_6':
+        #
+        Student_answer = get_student_voice_and_transcribe(message)
+
+        # БД
+        save_to_db(
+            conversationId=str(message.chat.id) + "-angelina",
+            userId=message.from_user.id,
+            userName=message.from_user.username,
+            isStudent=1,
+            userSpeechRecordedAt=int(time.time()),
+            userSpeechRecordFormat='wav',
+            # userSpeech=Student_answer,
+            userSpeechRecordPath='last_voice_from_user' + str(message.from_user.id) + '.wav',
+            userSpeechRecordFileName='last_voice_from_user' + str(message.from_user.id) + '.wav',
+        )
+        # ----- БД
+
+        comment_from_GPT = check_student_time_7(Student_answer, active_users[message.from_user.id]['Question'])
+        send_message_as_a_voice(message, comment_from_GPT, "facebook")
+        if re.search("", Student_answer.lower()):
+            active_users[message.from_user.id]['State'] = 'time_7'
+            start_message = '''💣'''
+            bot.send_message(message.chat.id, start_message, parse_mode='html')
+            random_time_111 = ["01:01", "01:02", "01:03", "01:04", "01:05", "01:06", "01:07", "01:08",
+                               "01:09", "01:10", "01:11", "01:12", "01:13", "01:14", "01:15", "01:16",
+                               "01:17", "01:18", "01:19", "01:20", "01:21", "19:19", "19:20", "19:21",
+                               "19:22", "19:23", "19:24", "19:25", "19:26", "19:27", "19:28", "19:29",
+                               "23:11", "23:12", "23:13", "23:14", "23:15", "23:16", "23:17", "23:18",
+                               "23:19", "23:20"]
+            active_users[message.from_user.id]['Question'] = random.choice(random_time_111)
+            bot.send_message(message.chat.id, '🎙👉🏻 Record voice: ' + active_users[message.from_user.id]['Question'], parse_mode='html')
+
+        else:
+            start_message_part4 = '''❌\nRecord your message once again'''
+            bot.send_message(message.chat.id, start_message_part4, parse_mode='html')
+            start_message_part4 = '''Oops, it seems to me you missheard some important information.\nPlease, revise it again and try to record the voice message again.!'''
+            bot.send_message(message.chat.id, start_message_part4, parse_mode='html')
+
+
+    elif active_users[message.from_user.id]['State'] == 'time_7':
+        #
+        Student_answer = get_student_voice_and_transcribe(message)
+
+        # БД
+        save_to_db(
+            conversationId=str(message.chat.id) + "-angelina",
+            userId=message.from_user.id,
+            userName=message.from_user.username,
+            isStudent=1,
+            userSpeechRecordedAt=int(time.time()),
+            userSpeechRecordFormat='wav',
+            # userSpeech=Student_answer,
+            userSpeechRecordPath='last_voice_from_user' + str(message.from_user.id) + '.wav',
+            userSpeechRecordFileName='last_voice_from_user' + str(message.from_user.id) + '.wav',
+        )
+        # ----- БД
+        comment_from_GPT = check_student_time_7(Student_answer, active_users[message.from_user.id]['Question'])
+        send_message_as_a_voice(message, comment_from_GPT, "facebook")
+        if re.search("", Student_answer.lower()):
+            start_message = '''💣'''
+            bot.send_message(message.chat.id, start_message, parse_mode='html')
+            active_users[message.from_user.id]['State'] = 'time_8'
+            random_time_11 = ["01:30", "02:30", "03:30", "04:30", "05:30", "06:30", "07:30", "08:30", "09:30",
+                              "10:30", "11:30", "12:30", "16:30", "17:30", "18:30", "19:30", "20:30", "21:30", "22:30",
+                              "23:30", "24:30"]
+            active_users[message.from_user.id]['Question'] = random.choice(random_time_11)
+            bot.send_message(message.chat.id, '🎙👉🏻 Record voice: ' + active_users[message.from_user.id]['Question'], parse_mode='html')
+
+        else:
+            start_message_part4 = '''❌\nRecord your message once again'''
+            bot.send_message(message.chat.id, start_message_part4, parse_mode='html')
+            start_message_part4 = '''Please, repeat the theory!'''
+            bot.send_message(message.chat.id, start_message_part4, parse_mode='html')
+
+    elif active_users[message.from_user.id]['State'] == 'time_8':
+        #
+        Student_answer = get_student_voice_and_transcribe(message)
+
+        # БД
+        save_to_db(
+            conversationId=str(message.chat.id) + "-angelina",
+            userId=message.from_user.id,
+            userName=message.from_user.username,
+            isStudent=1,
+            userSpeechRecordedAt=int(time.time()),
+            userSpeechRecordFormat='wav',
+            # userSpeech=Student_answer,
+            userSpeechRecordPath='last_voice_from_user' + str(message.from_user.id) + '.wav',
+            userSpeechRecordFileName='last_voice_from_user' + str(message.from_user.id) + '.wav',
+        )
+        # ----- БД
+
+        comment_from_GPT = check_student_time_7(Student_answer, active_users[message.from_user.id]['Question'])
+        send_message_as_a_voice(message, comment_from_GPT, "facebook")
+        if re.search("", Student_answer.lower()):
+            active_users[message.from_user.id]['State'] = 'time_9'
+            start_message_part4 = '''you try very hard! let's practice some more, but you're already a great fellow 🔥❤️'''
+            bot.send_message(message.chat.id, start_message_part4, parse_mode='html')
+            random_time_12 = ["01:31", "02:31", "03:31", "04:31", "05:31", "06:31", "07:31", "08:31", "09:31",
+                              "10:31", "11:31", "12:31", "16:31", "17:31", "18:31", "19:31", "20:31", "21:31", "22:31",
+                              "23:31", "24:31"]
+            active_users[message.from_user.id]['Question'] = random.choice(random_time_12)
+            bot.send_message(message.chat.id, '🎙👉🏻 Record voice: ' + active_users[message.from_user.id]['Question'], parse_mode='html')
+
+        else:
+            start_message_part4 = '''❌\nRecord your message once again'''
+            bot.send_message(message.chat.id, start_message_part4, parse_mode='html')
+
+
+    elif active_users[message.from_user.id]['State'] == 'time_9':
+        #
+        Student_answer = get_student_voice_and_transcribe(message)
+
+        # БД
+        save_to_db(
+            conversationId=str(message.chat.id) + "-angelina",
+            userId=message.from_user.id,
+            userName=message.from_user.username,
+            isStudent=1,
+            userSpeechRecordedAt=int(time.time()),
+            userSpeechRecordFormat='wav',
+            # userSpeech=Student_answer,
+            userSpeechRecordPath='last_voice_from_user' + str(message.from_user.id) + '.wav',
+            userSpeechRecordFileName='last_voice_from_user' + str(message.from_user.id) + '.wav',
+        )
+        # ----- БД
+
+        comment_from_GPT = check_student_time_7(Student_answer, active_users[message.from_user.id]['Question'])
+        send_message_as_a_voice(message, comment_from_GPT, "facebook")
+        if re.search("", Student_answer.lower()):
+            active_users[message.from_user.id]['State'] = 'time_10'
+            start_message_part4 = '''Next:'''
+            bot.send_message(message.chat.id, start_message_part4, parse_mode='html')
+            random_time_12 = ["01:31", "02:31", "03:31", "04:31", "05:31", "06:31", "07:31", "08:31", "09:31",
+                              "10:31", "11:31", "12:31", "16:31", "17:31", "18:31", "19:31", "20:31", "21:31", "22:31",
+                              "23:31", "24:31"]
+            active_users[message.from_user.id]['Question'] = random.choice(random_time_12)
+            bot.send_message(message.chat.id, start_message_part4 + '🎙👉🏻 Record voice: ' + active_users[message.from_user.id]['Question'],
+                             parse_mode='html')
+
+        else:
+            start_message_part4 = '''❌\nRecord your message once again'''
+            bot.send_message(message.chat.id, start_message_part4, parse_mode='html')
+
+
+    elif active_users[message.from_user.id]['State'] == 'time_10':
+        #
+        Student_answer = get_student_voice_and_transcribe(message)
+
+        # БД
+        save_to_db(
+            conversationId=str(message.chat.id) + "-angelina",
+            userId=message.from_user.id,
+            userName=message.from_user.username,
+            isStudent=1,
+            userSpeechRecordedAt=int(time.time()),
+            userSpeechRecordFormat='wav',
+            # userSpeech=Student_answer,
+            userSpeechRecordPath='last_voice_from_user' + str(message.from_user.id) + '.wav',
+            userSpeechRecordFileName='last_voice_from_user' + str(message.from_user.id) + '.wav',
+        )
+
+        # ----- БД
+
+        comment_from_GPT = check_student_time_7(Student_answer, active_users[message.from_user.id]['Question'])
+        send_message_as_a_voice(message, comment_from_GPT, "facebook")
+        if re.search("", Student_answer.lower()):
+            active_users[message.from_user.id]['State'] = ''
+            start_message = '''💣'''
+            bot.send_message(message.chat.id, start_message, parse_mode='html')
+            start_message_part4 = '''🎉Amazing!\n💙Topics learnt\n❤️You are awesome\nChoose next lesson from menu
+'''
+            bot.send_message(message.chat.id, start_message_part4, parse_mode='html')
+
+        else:
+            start_message_part4 = '''❌\nRecord your message once again'''
+            bot.send_message(message.chat.id, start_message_part4, parse_mode='html')
+
+
+@bot.message_handler(content_types=['text'])
+def text_processing(message):
+    global active_users
+    check_user_exist(message.from_user.id)
+    print(message)
+    print(active_users)
+    check_user_exist(message.from_user.id)
+    print(active_users)
+    # ветка когда студент записывает сам емейл
+    if active_users[message.from_user.id]['State'] == 'at_3_text_email':
+        comment_from_GPT = check_student_said_antoshka_text(message.text)
+        send_message_as_a_voice(message, comment_from_GPT, "facebook")
+
+        if re.search(".+?@.+?(\.|dot).+?", message.text):
+
+            active_users[message.from_user.id]['State'] = 'at_4_own_email_voice'
+            start_message_part4 = '''Great! Say it now! Remember: @ sounds like "at"\nSend me your email in voice 🎙'''
+            bot.send_message(message.chat.id, start_message_part4, parse_mode='html')
+        else:
+            start_message_part4 = '''❌'''
+            bot.send_message(message.chat.id, start_message_part4, parse_mode='html')
+
+    pass
+
+    if active_users[message.from_user.id]['State'] == 'at_6_test':
+        comment_from_GPT = promt_for_finish_at_theme(message.text)
+        send_message_as_a_voice(message, comment_from_GPT, "facebook")
+
+        if re.search(".+?|3..+?", message.text):
+
+            active_users[message.from_user.id]['State'] = ' '
+            start_message_part4 = '''WELL DONE, PROFESSOR! SUPER DUPER! 🔥🔥🔥🔥🔥!\nChoose in menu next lesson'''
+            bot.send_message(message.chat.id, start_message_part4, parse_mode='html')
+        else:
+            start_message_part4 = '''❌'''
+            bot.send_message(message.chat.id, start_message_part4, parse_mode='html')
+
+    pass
+
+
+
+bot.polling(none_stop=True)
